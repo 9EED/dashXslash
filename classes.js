@@ -9,7 +9,7 @@ class Player {
         this.direction = 1
         this.teleport_cooldown = 800
         this.teleport_timer = 0
-        this.hp = 3
+        this.hp = 100
     }
     update(){
         this.teleport_timer -= 1000/60
@@ -31,9 +31,9 @@ class Player {
         dir.y = -dir.y
         this.direction = dir.x > 0 ? 1 : -1
         let slash = Bodies.rectangle(
-            this.body.position.x + dir.x*120,
-            this.body.position.y + dir.y*120,
-            300, 150, {
+            this.body.position.x + dir.x*130,
+            this.body.position.y + dir.y*130,
+            200, 120, {
             label: "slash",
             isStatic: true,
             isSensor: true,
@@ -46,16 +46,13 @@ class Player {
             )
         return slash
     }
-    take_damage(){
-        this.hp -= 1
-    }
 }
 class Enemy {
     constructor(screen_width, can_fly, position_x, position_y, level, size, hp){
         if(typeof can_fly === "undefined") can_fly = false
         this.can_fly = can_fly
         this.level = level || Math.floor(random(1, 4))
-        this.speed = Math.log(this.level) + 2
+        this.speed = Math.log(this.level)*1.5 + 1
         if(typeof size !== "undefined") size.x *= random(1.1, 1.3)
         if(typeof size !== "undefined") size.y *= random(1.1, 1.3)
         this.knockback_timer = 0
@@ -72,9 +69,11 @@ class Enemy {
             {
             label: "enemy",
             render: {
-                fillStyle: `hsl(${this.level*30 % 360}, 100%, 50%)`
+                fillStyle: `hsl(${100-this.level*10}, 100%, 50%)`
             }
         })
+        this.level = Math.min(this.level, 10)
+        this.hp = Math.min(this.hp, 10)
         this.target = Vector.create(0, 100)
     }
     update(player_pos){
@@ -170,7 +169,7 @@ class Game {
                 x: (enemy1.size.x + enemy2.size.x + Math.max(enemy1.size.x, enemy2.size.x))/3,
                 y: (enemy1.size.y + enemy2.size.y + Math.max(enemy1.size.y, enemy2.size.y))/3
             },
-            enemy1.hp + enemy2.hp + 2
+            enemy1.hp + enemy2.hp - 1
         )
         return new_enemy
     }
@@ -181,11 +180,13 @@ class Game {
     collisions(){
         for(let pair of this.engine.pairs.list){
             if(pair.bodyA.label == "player" && pair.bodyB.label == "enemy"){
-                this.player.take_damage()
-                this.delete_enemy(pair.bodyB)
+                if(this.enemies.find(e => e.body.id == pair.bodyB.id)){
+                    this.player.hp -= this.enemies.find(e => e.body.id == pair.bodyB.id).level
+                    this.delete_enemy(pair.bodyB)
+                }
             }
             if(pair.bodyA.label == "enemy" && pair.bodyB.label == "player"){
-                this.player.take_damage()
+                this.player.hp -= this.enemies.find(e => e.body.id == pair.bodyA.id).level
                 this.delete_enemy(pair.bodyA)
             }
             if(pair.bodyA.label == "slash" && pair.bodyB.label == "enemy"){
@@ -240,7 +241,7 @@ class Game {
         if(mouse.left) this.mouse_down()
         if(!mouse.left) this.mouse_up()
         if(!this.mouse_delta) return 0
-        if(Vector.magnitude(this.mouse_delta) < 30){
+        if(Vector.magnitude(this.mouse_delta) < 50){
             this.player.teleport(mouse.x-this.screen_width/2,this.screen_height-mouse.y)
         } else {
             let slash = this.player.slash(Vector.normalise(this.mouse_delta))
