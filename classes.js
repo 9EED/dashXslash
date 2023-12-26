@@ -51,36 +51,43 @@ class Player {
     }
 }
 class Enemy {
-    constructor(){
-        this.body = Bodies.rectangle(0, 0, 10, 10, {
+    constructor(screen_width, can_fly, poistion_x, poistion_y, level, size){
+        if(typeof can_fly === "undefined") can_fly = false
+        this.can_fly = can_fly
+        this.level = level || Math.floor(random(1, 4))
+        this.speed = Math.log(this.level) + 2
+        if(typeof size !== "undefined") size.x *= random(1.1, 1.3)
+        if(typeof size !== "undefined") size.y *= random(1.1, 1.3)
+        this.size = size || {
+            x: this.can_fly ? 35 : random(25, 35),
+            y: this.can_fly ? 35 : random(50, 60)
+        }
+        this.body = Bodies.rectangle(
+            poistion_x || (Math.random() > 0.5 ? -screen_width/2 : screen_width/2),
+            poistion_y || (this.can_fly ? random(100, 800) : random(50, 100)),
+            this.size.x,
+            this.size.y,
+            {
             label: "enemy",
-            isStatic: false,
             render: {
-                fillStyle: "red"
+                fillStyle: `hsl(${this.level*30 % 360}, 100%, 50%)`
             }
         })
-        this.body.value = 1
-        this.target = Vector.create(0, 0)
-        this.speed = 2
-    }
-    radomize(){
-        MBody.scale(this.body, 30/10, 50/10)
-        MBody.setPosition(this.body, {x:(Math.floor(Math.random()*2)*2-1)*500+random(-100,100), y: random(50, 100)})
-        this.speed = random(1, 3)
+        this.target = Vector.create(0, 100)
     }
     update(player_pos){
         this.target = Vector.create(
-            lerp(this.target.x, player_pos.x, 0.05),
-            lerp(this.target.y, player_pos.y, 0.05)
+            lerp(this.target.x, player_pos.x, 0.005 * this.level),
+            lerp(this.target.y, player_pos.y, 0.005 * this.level)
         )
         let normalized = Vector.normalise(Vector.sub(this.target, this.body.position))
-        normalized.y = 0
-        MBody.setVelocity(this.body, Vector.mult(normalized, this.speed))
+        if(!this.can_fly) normalized.y = 0
+        if(this.can_fly) MBody.applyForce(this.body, this.body.position, {x: 0, y: 0.0005})
+        if(Vector.magnitude(Vector.sub(this.target, this.body.position))) MBody.setVelocity(this.body, Vector.mult(normalized, this.speed))
         MBody.setAngle(this.body, 0)
         MBody.setAngularVelocity(this.body, 0)
     }
 }
-
 class Game {
     constructor(){
         this.player = null
@@ -109,6 +116,9 @@ class Game {
         this.mouse_down_pos = null
         this.mouse_delta = null
         this.slashes = []
+        this.flying_ratio = 0.4
+        this.merge_chance = 2 // in % per frame
+        this.platform_max_age = 2000
     }
     resize(){
         this.screen_width = window.innerWidth
@@ -140,12 +150,22 @@ class Game {
         Composite.add(this.engine.world, enemy.body)
     }
     merge_enemies(enemy1, enemy2){
-        let new_enemy = new Enemy()
-        new_enemy.body.value = enemy1.value + enemy2.value
-        new_enemy.speed = (enemy1.speed + enemy2.speed + 1)/3
-        MBody.setPosition(new_enemy.body, enemy2.position)
-        MBody.scale(new_enemy.body, 30/10 + new_enemy.body.value/3, 50/10 + new_enemy.body.value/3)
+        let new_enemy = new Enemy(
+            this.screen_width,
+            enemy1.can_fly || enemy2.can_fly || (random(0, 100) < 20),
+            enemy1.body.position.x,
+            enemy1.body.position.y,
+            enemy1.level + enemy2.level,
+            {
+                x: (enemy1.size.x + enemy2.size.x + Math.max(enemy1.size.x, enemy2.size.x))/3,
+                y: (enemy1.size.y + enemy2.size.y + Math.max(enemy1.size.y, enemy2.size.y))/3
+            }
+        )
         return new_enemy
+    }
+    break_platform(platform){
+        this.platforms = this.platforms.filter(p => p.id != platform.id)
+        Composite.remove(this.engine.world, platform)
     }
     collisions(){
         for(let pair of this.engine.pairs.list){
@@ -163,11 +183,20 @@ class Game {
             if(pair.bodyA.label == "enemy" && pair.bodyB.label == "slash"){
                 this.delete_enemy(pair.bodyA)
             }
-            if(pair.bodyA.label == "enemy" && pair.bodyB.label == "enemy"){
-                this.add_enemy(this.merge_enemies(pair.bodyA, pair.bodyB))
-                this.delete_enemy(pair.bodyA)
-                this.delete_enemy(pair.bodyB)
+            if(pair.bodyA.label == "enemy" && pair.bodyB.label == "enemy" && random(0, 100) < this.merge_chance){
+                let enemy1 = this.enemies.find(e => e.body.id == pair.bodyA.id)
+                let enemy2 = this.enemies.find(e => e.body.id == pair.bodyB.id)
+                if(enemy1 && enemy2){
+                    this.add_enemy(this.merge_enemies(
+                        this.enemies.find(e => e.body.id == pair.bodyA.id),
+                        this.enemies.find(e => e.body.id == pair.bodyB.id)
+                    ))
+                    this.delete_enemy(pair.bodyA)
+                    this.delete_enemy(pair.bodyB)
+                }
             }
+            if(pair.bodyA.label == "player" && pair.bodyB.label == "platform") pair.bodyB.age += 1000/60
+            if(pair.bodyA.label == "platform" && pair.bodyB.label == "player") pair.bodyA.age += 1000/60
             
         }
         if(this.player.body.position.x < -this.screen_width/2){
@@ -208,28 +237,43 @@ class Game {
     update(){
         this.player.update()
         this.enemies.forEach(e =>e.update(this.player.body.position))
-        this.slashes.forEach(s => MBody.setPosition(s,
-            Vector.add(
-                s.position,
-                Vector.sub(this.player.body.position, this.player.body.positionPrev)
-            )))
+        this.slashes.forEach(s => MBody.setPosition(s, Vector.add(
+            s.position,
+            Vector.sub(this.player.body.position, this.player.body.positionPrev)
+        )))
+        this.platforms.forEach(p => {if(p.age > this.platform_max_age) this.break_platform(p)})
         this.collisions()
         this.handleInput()
     }
     start(){
         this.player = new Player()
         setInterval(()=>{
-            let enemy = new Enemy()
-            enemy.radomize()
+            let enemy = new Enemy(this.screen_width, random(0, 1) < this.flying_ratio)
             this.enemies.push(enemy)
             Composite.add(this.engine.world, enemy.body)
-        }, 1500)
-        this.platforms = [
-            Bodies.rectangle(0, 0, 2000, 50, {isStatic: true, render: {fillStyle: "white"}}),
-            Bodies.rectangle(300, 320, 200, 25, {isStatic: true, render: {fillStyle: "white"}}),
-            Bodies.rectangle(-300, 320, 200, 25, {isStatic: true, render: {fillStyle: "white"}}),
-        ]
-        Composite.add(this.engine.world, [this.player.body, ...this.platforms])
+        }, 600)
+        setInterval(()=>{
+            let platform = Bodies.rectangle(
+                random(-this.screen_width/2, this.screen_width/2),
+                random(100, this.screen_height-150),
+                random(100, 300),
+                20,
+                {
+                    label: "platform",
+                    isStatic: true,
+                    render: {
+                        fillStyle: "#fff"
+                    }
+                }
+            )
+            platform.age = 0
+            if(this.platforms.length < 3){
+                this.platforms.push(platform)
+                Composite.add(this.engine.world, platform)
+            }
+        }, 3000)
+        this.floor = Bodies.rectangle(0, 0, 3000, 50, {isStatic: true, render: {fillStyle: "white"}})
+        Composite.add(this.engine.world, [this.player.body, this.floor])
         Render.run(this.renderer)
         Runner.run(this.runner, this.engine)
         Events.on(this.engine, 'beforeUpdate', this.update.bind(this))
