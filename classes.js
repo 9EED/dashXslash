@@ -31,9 +31,9 @@ class Player {
         dir.y = -dir.y
         this.direction = dir.x > 0 ? 1 : -1
         let slash = Bodies.rectangle(
-            this.body.position.x + dir.x*100,
-            this.body.position.y + dir.y*100,
-            230, 110, {
+            this.body.position.x + dir.x*120,
+            this.body.position.y + dir.y*120,
+            300, 150, {
             label: "slash",
             isStatic: true,
             isSensor: true,
@@ -52,19 +52,21 @@ class Player {
 }
 class Enemy {
     constructor(){
-        this.body = Bodies.rectangle(0, 10, 10, 10, {
+        this.body = Bodies.rectangle(0, 0, 10, 10, {
             label: "enemy",
             isStatic: false,
             render: {
                 fillStyle: "red"
             }
         })
+        this.body.value = 1
         this.target = Vector.create(0, 0)
         this.speed = 2
     }
     radomize(){
         MBody.scale(this.body, 30/10, 50/10)
         MBody.setPosition(this.body, {x:(Math.floor(Math.random()*2)*2-1)*500+random(-100,100), y: random(50, 100)})
+        this.speed = random(1, 3)
     }
     update(player_pos){
         this.target = Vector.create(
@@ -129,26 +131,44 @@ class Game {
         }
         Render.startViewTransform(this.renderer)
     }
+    delete_enemy(enemy){
+        this.enemies = this.enemies.filter(e => e.body.id != enemy.id)
+        Composite.remove(this.engine.world, enemy)
+    }
+    add_enemy(enemy){
+        this.enemies.push(enemy)
+        Composite.add(this.engine.world, enemy.body)
+    }
+    merge_enemies(enemy1, enemy2){
+        let new_enemy = new Enemy()
+        new_enemy.body.value = enemy1.value + enemy2.value
+        new_enemy.speed = (enemy1.speed + enemy2.speed + 1)/3
+        MBody.setPosition(new_enemy.body, enemy2.position)
+        MBody.scale(new_enemy.body, 30/10 + new_enemy.body.value/3, 50/10 + new_enemy.body.value/3)
+        return new_enemy
+    }
     collisions(){
         for(let pair of this.engine.pairs.list){
             if(pair.bodyA.label == "player" && pair.bodyB.label == "enemy"){
                 this.player.take_damage()
-                this.enemies = this.enemies.filter(e => e.body.id != pair.bodyB.id)
-                Composite.remove(this.engine.world, pair.bodyB)
+                this.delete_enemy(pair.bodyB)
             }
             if(pair.bodyA.label == "enemy" && pair.bodyB.label == "player"){
                 this.player.take_damage()
-                this.enemies = this.enemies.filter(e => e.body.id != pair.bodyA.id)
-                Composite.remove(this.engine.world, pair.bodyA)
+                this.delete_enemy(pair.bodyA)
             }
             if(pair.bodyA.label == "slash" && pair.bodyB.label == "enemy"){
-                this.enemies = this.enemies.filter(e => e.body.id != pair.bodyB.id)
-                Composite.remove(this.engine.world, pair.bodyB)
+                this.delete_enemy(pair.bodyB)
             }
             if(pair.bodyA.label == "enemy" && pair.bodyB.label == "slash"){
-                this.enemies = this.enemies.filter(e => e.body.id != pair.bodyA.id)
-                Composite.remove(this.engine.world, pair.bodyA)
+                this.delete_enemy(pair.bodyA)
             }
+            if(pair.bodyA.label == "enemy" && pair.bodyB.label == "enemy"){
+                this.add_enemy(this.merge_enemies(pair.bodyA, pair.bodyB))
+                this.delete_enemy(pair.bodyA)
+                this.delete_enemy(pair.bodyB)
+            }
+            
         }
         if(this.player.body.position.x < -this.screen_width/2){
             MBody.setPosition(this.player.body, {x: -this.screen_width/2, y: this.player.body.position.y})
@@ -172,7 +192,7 @@ class Game {
         if(mouse.left) this.mouse_down()
         if(!mouse.left) this.mouse_up()
         if(!this.mouse_delta) return 0
-        if(Vector.magnitude(this.mouse_delta) < 20){
+        if(Vector.magnitude(this.mouse_delta) < 30){
             this.player.teleport(mouse.x-this.screen_width/2,this.screen_height-mouse.y)
         } else {
             let slash = this.player.slash(Vector.normalise(this.mouse_delta))
@@ -206,6 +226,8 @@ class Game {
         }, 1500)
         this.platforms = [
             Bodies.rectangle(0, 0, 2000, 50, {isStatic: true, render: {fillStyle: "white"}}),
+            Bodies.rectangle(300, 320, 200, 25, {isStatic: true, render: {fillStyle: "white"}}),
+            Bodies.rectangle(-300, 320, 200, 25, {isStatic: true, render: {fillStyle: "white"}}),
         ]
         Composite.add(this.engine.world, [this.player.body, ...this.platforms])
         Render.run(this.renderer)
