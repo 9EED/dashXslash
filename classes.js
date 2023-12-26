@@ -22,9 +22,9 @@ class Player {
     teleport(x, y){
         if(this.teleport_timer > 0) return 0
         let delta = Vector.sub({x: x, y: y}, this.body.position)
-        let normalized = Vector.normalise(delta)
+        let normalised = Vector.normalise(delta)
         MBody.setPosition(this.body, {x: x, y: y})
-        MBody.setVelocity(this.body, Vector.mult(normalized, 5))
+        MBody.setVelocity(this.body, Vector.mult(normalised, 5))
         this.teleport_timer = this.teleport_cooldown
     }
     slash(dir){
@@ -51,20 +51,22 @@ class Player {
     }
 }
 class Enemy {
-    constructor(screen_width, can_fly, poistion_x, poistion_y, level, size){
+    constructor(screen_width, can_fly, position_x, position_y, level, size, hp){
         if(typeof can_fly === "undefined") can_fly = false
         this.can_fly = can_fly
         this.level = level || Math.floor(random(1, 4))
         this.speed = Math.log(this.level) + 2
         if(typeof size !== "undefined") size.x *= random(1.1, 1.3)
         if(typeof size !== "undefined") size.y *= random(1.1, 1.3)
+        this.knockback_timer = 0
+        this.hp = hp || this.level
         this.size = size || {
             x: this.can_fly ? 35 : random(25, 35),
             y: this.can_fly ? 35 : random(50, 60)
         }
         this.body = Bodies.rectangle(
-            poistion_x || (Math.random() > 0.5 ? -screen_width/2 : screen_width/2),
-            poistion_y || (this.can_fly ? random(100, 800) : random(50, 100)),
+            position_x || (Math.random() > 0.5 ? -screen_width/2 : screen_width/2),
+            position_y || (this.can_fly ? random(100, 800) : random(50, 100)),
             this.size.x,
             this.size.y,
             {
@@ -76,16 +78,24 @@ class Enemy {
         this.target = Vector.create(0, 100)
     }
     update(player_pos){
+        this.knockback_timer -= 1000/60
+        if(this.knockback_timer < 0) this.knockback_timer = 0
         this.target = Vector.create(
             lerp(this.target.x, player_pos.x, 0.005 * this.level),
             lerp(this.target.y, player_pos.y, 0.005 * this.level)
         )
-        let normalized = Vector.normalise(Vector.sub(this.target, this.body.position))
-        if(!this.can_fly) normalized.y = 0
+        let normalised = Vector.normalise(Vector.sub(this.target, this.body.position))
+        if(this.knockback_timer > 0) normalised = Vector.mult(normalised, -4)
+        if(!this.can_fly) normalised.y = 0
         if(this.can_fly) MBody.applyForce(this.body, this.body.position, {x: 0, y: 0.0005})
-        if(Vector.magnitude(Vector.sub(this.target, this.body.position))) MBody.setVelocity(this.body, Vector.mult(normalized, this.speed))
+        if(Vector.magnitude(Vector.sub(this.target, this.body.position))) MBody.setVelocity(this.body, Vector.mult(normalised, this.speed))
         MBody.setAngle(this.body, 0)
         MBody.setAngularVelocity(this.body, 0)
+
+    }
+    knockback(player_pos){
+        if(this.knockback_timer > 0) return 0
+        this.knockback_timer = 200
     }
 }
 class Game {
@@ -159,7 +169,8 @@ class Game {
             {
                 x: (enemy1.size.x + enemy2.size.x + Math.max(enemy1.size.x, enemy2.size.x))/3,
                 y: (enemy1.size.y + enemy2.size.y + Math.max(enemy1.size.y, enemy2.size.y))/3
-            }
+            },
+            enemy1.hp + enemy2.hp + 2
         )
         return new_enemy
     }
@@ -178,10 +189,18 @@ class Game {
                 this.delete_enemy(pair.bodyA)
             }
             if(pair.bodyA.label == "slash" && pair.bodyB.label == "enemy"){
-                this.delete_enemy(pair.bodyB)
+                let enemy = this.enemies.find(e => e.body.id == pair.bodyB.id)
+                if(enemy) if (enemy.knockback_timer <= 0) {
+                    enemy.knockback(this.player.body.position)
+                    enemy.hp -= 1
+                }
             }
             if(pair.bodyA.label == "enemy" && pair.bodyB.label == "slash"){
-                this.delete_enemy(pair.bodyA)
+                let enemy = this.enemies.find(e => e.body.id == pair.bodyA.id)
+                if(enemy) if (enemy.knockback_timer <= 0) {
+                    enemy.knockback(this.player.body.position)
+                    enemy.hp -= 1
+                }
             }
             if(pair.bodyA.label == "enemy" && pair.bodyB.label == "enemy" && random(0, 100) < this.merge_chance){
                 let enemy1 = this.enemies.find(e => e.body.id == pair.bodyA.id)
@@ -236,7 +255,10 @@ class Game {
     }
     update(){
         this.player.update()
-        this.enemies.forEach(e =>e.update(this.player.body.position))
+        this.enemies.forEach(e =>{
+            e.update(this.player.body.position)
+            if(e.hp <= 0) this.delete_enemy(e.body)
+        })
         this.slashes.forEach(s => MBody.setPosition(s, Vector.add(
             s.position,
             Vector.sub(this.player.body.position, this.player.body.positionPrev)
