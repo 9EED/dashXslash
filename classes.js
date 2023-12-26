@@ -7,14 +7,17 @@ class Player {
             }
         })
         this.direction = 1
-        this.teleport_cooldown = 500
+        this.teleport_cooldown = 800
         this.teleport_timer = 0
         this.hp = 3
     }
     update(){
         this.teleport_timer -= 1000/60
+        if(this.teleport_timer < 0) this.teleport_timer = 0
         MBody.setAngularVelocity(this.body, 0)
         MBody.setAngle(this.body, 0)
+        if(this.teleport_timer > 0) MBody.applyForce(this.body, this.body.position, {x: 0, y: 0.005})
+        if(this.body.position.y < -1000) this.hp = 0
     }
     teleport(x, y){
         if(this.teleport_timer > 0) return 0
@@ -57,7 +60,7 @@ class Enemy {
             }
         })
         this.target = Vector.create(0, 0)
-        this.speed = 1
+        this.speed = 2
     }
     radomize(){
         MBody.scale(this.body, 30/10, 50/10)
@@ -69,6 +72,7 @@ class Enemy {
             lerp(this.target.y, player_pos.y, 0.05)
         )
         let normalized = Vector.normalise(Vector.sub(this.target, this.body.position))
+        normalized.y = 0
         MBody.setVelocity(this.body, Vector.mult(normalized, this.speed))
         MBody.setAngle(this.body, 0)
         MBody.setAngularVelocity(this.body, 0)
@@ -78,8 +82,8 @@ class Enemy {
 class Game {
     constructor(){
         this.player = null
-        this.enemies = null
-        this.platforms = null
+        this.enemies = []
+        this.platforms = []
         this.screen_width = window.innerWidth
         this.screen_height = window.innerHeight
         this.engine = Engine.create({
@@ -100,6 +104,9 @@ class Game {
                 background: 'transparent',
             }
         })
+        this.mouse_down_pos = null
+        this.mouse_delta = null
+        this.slashes = []
     }
     resize(){
         this.screen_width = window.innerWidth
@@ -134,6 +141,22 @@ class Game {
                 this.enemies = this.enemies.filter(e => e.body.id != pair.bodyA.id)
                 Composite.remove(this.engine.world, pair.bodyA)
             }
+            if(pair.bodyA.label == "slash" && pair.bodyB.label == "enemy"){
+                this.enemies = this.enemies.filter(e => e.body.id != pair.bodyB.id)
+                Composite.remove(this.engine.world, pair.bodyB)
+            }
+            if(pair.bodyA.label == "enemy" && pair.bodyB.label == "slash"){
+                this.enemies = this.enemies.filter(e => e.body.id != pair.bodyA.id)
+                Composite.remove(this.engine.world, pair.bodyA)
+            }
+        }
+        if(this.player.body.position.x < -this.screen_width/2){
+            MBody.setPosition(this.player.body, {x: -this.screen_width/2, y: this.player.body.position.y})
+            MBody.setVelocity(this.player.body, {x: Math.abs(this.player.body.velocity.x), y: this.player.body.velocity.y})
+        }
+        if(this.player.body.position.x > this.screen_width/2){
+            MBody.setPosition(this.player.body, {x: this.screen_width/2, y: this.player.body.position.y})
+            MBody.setVelocity(this.player.body, {x: -Math.abs(this.player.body.velocity.x), y: this.player.body.velocity.y})
         }
     }
     mouse_down(){
@@ -153,27 +176,38 @@ class Game {
             this.player.teleport(mouse.x-this.screen_width/2,this.screen_height-mouse.y)
         } else {
             let slash = this.player.slash(Vector.normalise(this.mouse_delta))
+            this.slashes.push(slash)
             Composite.add(this.engine.world, slash)
             setTimeout(()=>{
                 Composite.remove(this.engine.world, slash)
-            }, 500)
+                this.slashes = this.slashes.filter(s => s.id != slash.id)
+            }, 300)
         }
         this.mouse_delta = null
     }
     update(){
         this.player.update()
         this.enemies.forEach(e =>e.update(this.player.body.position))
+        this.slashes.forEach(s => MBody.setPosition(s,
+            Vector.add(
+                s.position,
+                Vector.sub(this.player.body.position, this.player.body.positionPrev)
+            )))
         this.collisions()
         this.handleInput()
     }
     start(){
         this.player = new Player()
-        this.enemies = [new Enemy(), new Enemy(), new Enemy()]
-        this.enemies.map(e => e.radomize())
+        setInterval(()=>{
+            let enemy = new Enemy()
+            enemy.radomize()
+            this.enemies.push(enemy)
+            Composite.add(this.engine.world, enemy.body)
+        }, 1500)
         this.platforms = [
             Bodies.rectangle(0, 0, 2000, 50, {isStatic: true, render: {fillStyle: "white"}}),
         ]
-        Composite.add(this.engine.world, [this.player.body, ...this.enemies.map(e => e.body), ...this.platforms])
+        Composite.add(this.engine.world, [this.player.body, ...this.platforms])
         Render.run(this.renderer)
         Runner.run(this.runner, this.engine)
         Events.on(this.engine, 'beforeUpdate', this.update.bind(this))
