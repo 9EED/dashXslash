@@ -5,3 +5,31 @@ body{
     background-color: #111;
     overflow: hidden;
 }
+#container{
+    background-color: #151515;
+}
+#hud{
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    color: white;
+    font-family: Arial;
+    font-size: 15px;
+}
+#rotate{
+    color: white;
+    font-family: Arial;
+    font-size: 50px;
+    display: none;
+}
+@media (orientation: portrait) {
+    #container{
+        display: none;
+    }
+    #hud{
+        display: none;
+    }
+    #rotate{
+        display: block;
+    }
+}

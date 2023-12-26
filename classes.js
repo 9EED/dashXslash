@@ -10,6 +10,7 @@ class Player {
         this.teleport_cooldown = 800
         this.teleport_timer = 0
         this.hp = 100
+        this.strength = 2
     }
     update(){
         this.teleport_timer -= 1000/60
@@ -69,11 +70,11 @@ class Enemy {
             {
             label: "enemy",
             render: {
-                fillStyle: `hsl(${100-this.level*10}, 100%, 50%)`
+                fillStyle: `hsl(${100-this.level*5}, 100%, 50%)`
             }
         })
-        this.level = Math.min(this.level, 10)
-        this.hp = Math.min(this.hp, 10)
+        this.level = Math.min(this.level, 15)
+        this.hp = Math.min(this.hp, 15)
         this.target = Vector.create(0, 100)
     }
     update(player_pos){
@@ -90,15 +91,11 @@ class Enemy {
         if(Vector.magnitude(Vector.sub(this.target, this.body.position))) MBody.setVelocity(this.body, Vector.mult(normalised, this.speed))
         MBody.setAngle(this.body, 0)
         MBody.setAngularVelocity(this.body, 0)
-
-    }
-    knockback(player_pos){
-        if(this.knockback_timer > 0) return 0
-        this.knockback_timer = 200
     }
 }
 class Game {
     constructor(){
+        this.score = 0
         this.player = null
         this.enemies = []
         this.platforms = []
@@ -125,9 +122,13 @@ class Game {
         this.mouse_down_pos = null
         this.mouse_delta = null
         this.slashes = []
-        this.flying_ratio = 0.4
-        this.merge_chance = 2 // in % per frame
+        this.flying_ratio = .1
+        this.merge_chance = 2
         this.platform_max_age = 2000
+        this.enemy_spawn_rate = 1000
+        this.platform_spawn_rate = 1000
+        this.max_platforms = 5
+        this.stage = 0
     }
     resize(){
         this.screen_width = window.innerWidth
@@ -192,15 +193,15 @@ class Game {
             if(pair.bodyA.label == "slash" && pair.bodyB.label == "enemy"){
                 let enemy = this.enemies.find(e => e.body.id == pair.bodyB.id)
                 if(enemy) if (enemy.knockback_timer <= 0) {
-                    enemy.knockback(this.player.body.position)
-                    enemy.hp -= 1
+                    enemy.knockback_timer = 200
+                    enemy.hp -= this.player.strength
                 }
             }
             if(pair.bodyA.label == "enemy" && pair.bodyB.label == "slash"){
                 let enemy = this.enemies.find(e => e.body.id == pair.bodyA.id)
                 if(enemy) if (enemy.knockback_timer <= 0) {
-                    enemy.knockback(this.player.body.position)
-                    enemy.hp -= 1
+                    enemy.knockback_timer = 200
+                    enemy.hp -= this.player.strength
                 }
             }
             if(pair.bodyA.label == "enemy" && pair.bodyB.label == "enemy" && random(0, 100) < this.merge_chance){
@@ -258,24 +259,26 @@ class Game {
         this.player.update()
         this.enemies.forEach(e =>{
             e.update(this.player.body.position)
-            if(e.hp <= 0) this.delete_enemy(e.body)
+            if(e.hp <= 0){
+                this.score += e.level
+                this.delete_enemy(e.body)
+            }
         })
         this.slashes.forEach(s => MBody.setPosition(s, Vector.add(
             s.position,
             Vector.sub(this.player.body.position, this.player.body.positionPrev)
         )))
-        this.platforms.forEach(p => {if(p.age > this.platform_max_age) this.break_platform(p)})
+        this.platforms.forEach(p => {
+            if(p.age > this.platform_max_age) this.break_platform(p)
+            else p.age += 1000/60/5 })
         this.collisions()
         this.handleInput()
-    }
-    start(){
-        this.player = new Player()
-        setInterval(()=>{
-            let enemy = new Enemy(this.screen_width, random(0, 1) < this.flying_ratio)
+        if(this.engine.timing.timestamp % this.enemy_spawn_rate < 1) {
+            let enemy = new Enemy(this.screen_width, random(0, 1) < this.flying_ratio, undefined, undefined, this.stage+random(-1,2), undefined, undefined)
             this.enemies.push(enemy)
             Composite.add(this.engine.world, enemy.body)
-        }, 600)
-        setInterval(()=>{
+        }
+        if(this.engine.timing.timestamp % this.platform_spawn_rate < 1) {
             let platform = Bodies.rectangle(
                 random(-this.screen_width/2, this.screen_width/2),
                 random(100, this.screen_height-150),
@@ -290,11 +293,14 @@ class Game {
                 }
             )
             platform.age = 0
-            if(this.platforms.length < 3){
+            if(this.platforms.length < this.max_platforms){
                 this.platforms.push(platform)
                 Composite.add(this.engine.world, platform)
             }
-        }, 3000)
+        }
+    }
+    start(){
+        this.player = new Player()
         this.floor = Bodies.rectangle(0, 0, 3000, 50, {isStatic: true, render: {fillStyle: "white"}})
         Composite.add(this.engine.world, [this.player.body, this.floor])
         Render.run(this.renderer)
